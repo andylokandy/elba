@@ -48,6 +48,7 @@
 //! #### Build caching
 //! If we want to cache builds, we can just have a separate subfolder for ibcs.
 
+use copy_dir::copy_dir;
 use failure::{Error, ResultExt};
 use index::{Index, Indices};
 use indexmap::IndexMap;
@@ -297,18 +298,27 @@ impl Cache {
 /// Information about the source of package that is available somewhere in the file system.
 ///
 /// A package is a manifest file plus all the files that are part of it.
+// TODO: What information do we need?
 #[derive(Debug)]
 pub struct Source {
-    /// The package's manifest
-    pub manifest: Manifest,
+    // /// The package's manifest
+    // pub manifest: Manifest,
+    pub summary: Summary,
     pub meta: CacheMeta,
     pub location: DirectRes,
+    pub hash: String,
+    pub path: SrcPath,
     // TODO: Should this be a DirLock?
-    /// The root of the package
-    pub path: DirLock,
+    // /// The root of the package
+    // pub path: DirLock
 }
 
 impl Source {
+    // TODO: Perform hashing at initialization phase.
+    pub fn new() -> Self {
+        unimplemented!()
+    }
+
     /// Returns a hash of the Source's "contents."
     ///
     /// The purpose of this is for builds. The resolution graph only stores Summaries. If we were
@@ -337,6 +347,20 @@ impl Source {
     pub fn hash(&self) -> String {
         unimplemented!()
     }
+
+    pub fn unpack(&self, dest: PathBuf) -> Result<(), Error> {
+        match self.path {
+            SrcPath::Directory(dir) => copy_dir(dir.path(), dest)?,
+            SrcPath::Tar(tar) => unimplemented!(),
+        }
+    }
+}
+
+#[derive(Debug)]
+// TODO: Better name?
+enum SrcPath {
+    Tar(PathBuf),
+    Directory(DirLock),
 }
 
 // TODO: I don't think the struct is necessary; just throw this stuff into Cache
@@ -344,9 +368,6 @@ impl Source {
 #[derive(Debug)]
 pub struct Build {
     pub summary: Summary,
-    /// The actual place from which the package is downloaded. This is so that we get a different
-    /// hash if the index changes the location of a package from underneath us.
-    pub location: DirectRes,
     pub hash: String,
 }
 
@@ -357,22 +378,17 @@ impl Build {
     // hash method that tells us if their contents have changed.
     // Instead, we should just take a single Graph of Sources (maybe sources are the edge idk),
     // and hash the hash() of every source from the root and down to its deps.
-    pub fn new(summary: Summary, location: DirectRes, resolve: &Solve) -> Self {
+    pub fn new(summary: Summary, resolve: &Solve) -> Self {
         let mut hasher = Sha256::default();
-        hasher.input(summary.to_string().as_bytes());
-        hasher.input(location.to_string().as_bytes());
         // We assume here that the summary is for-sure in the resolution tree.
-        for dep in resolve.deps(&summary).unwrap() {
-            hasher.input(dep.id.to_string().as_bytes());
-            hasher.input(dep.version.to_string().as_bytes());
+        for src in resolve.sub_tree(&summary).unwrap() {
+            hasher.input(src.summary.id.to_string().as_bytes());
+            hasher.input(src.summary.version.to_string().as_bytes());
+            hasher.input(src.summary.hash.to_string().as_bytes());
         }
         let hash = hexify_hash(hasher.result().as_slice());
 
-        Build {
-            summary,
-            location,
-            hash,
-        }
+        Build { summary, hash }
     }
 
     /// Gets the corresponding directory name of a built package (with ibc files). This directory is
@@ -385,7 +401,6 @@ impl Build {
     /// totally different. The same package with the same constraints can be resolved with
     /// different versions in different contexts, so we want to make sure we're using the right
     /// builds of every package.
-
     pub fn dir_name(&self) -> String {
         format!(
             "{}_{}-{}",

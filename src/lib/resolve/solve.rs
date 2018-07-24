@@ -15,8 +15,8 @@ pub type SourceSolve = Graph<Source, ()>;
 
 /// Represents a fully resolved package dependency graph.
 #[derive(Debug, Clone)]
-pub struct Solve {
-    graph: Graph<Summary, ()>,
+pub struct Solve<Node> {
+    graph: Graph<Node, ()>,
 }
 
 impl Solve {
@@ -25,7 +25,7 @@ impl Solve {
     }
 
     /// Recursively traverse all dependencies of a given root, with breadth first
-    pub fn deps<'a>(&'a self, root: &Summary) -> Option<impl Iterator<Item = &Summary> + 'a> {
+    pub fn sub_tree<'a>(&'a self, root: &Summary) -> Option<impl Iterator<Item = &Summary> + 'a> {
         let root = self.find_node(root)?;
         Some(
             Bfs::new(&self.graph, root)
